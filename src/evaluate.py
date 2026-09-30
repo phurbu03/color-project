@@ -1,7 +1,7 @@
-"""평가: 조명별 정확도, 조명 간 일관성, confusion matrix
+"""평가: 조명별 정확도, 조명 간 일관성, confusion matrix, 불확실 표시의 정직성
 
 사용법 (프로젝트 폴더에서):
-    python src/evaluate.py data/raw
+    python src/evaluate.py data/raw/natural
     python src/evaluate.py data/synthetic
 
 파일명 규칙: 물체번호_정답색_조명_번호.jpg   예) 03_red_warm_2.jpg
@@ -40,25 +40,30 @@ def load_samples(folder):
     return samples
 
 
+def ratio(rows):
+    """rows 중 정답을 맞힌 비율. rows가 비어 있으면 None."""
+    if not rows:
+        return None
+    return sum(r[1] == r[3] for r in rows) / len(rows)
+
+
 def evaluate(samples, method_name):
     """보정 방법 하나에 대해 예측을 모으고 지표를 계산한다."""
     correct_fn = METHODS[method_name]
-    rows = []                                   # (물체, 정답, 조명, 예측)
+    rows = []                                   # (물체, 정답, 조명, 예측, 확신 여부)
     for path, obj, color, light in samples:
         img = read_image(path)
         if img is None:
             print(f"[건너뜀] 읽기 실패: {path}")
             continue
-        pred, _ = name_image(correct_fn(img))
-        rows.append((obj, color, light, pred))
+        corrected, reliable = correct_fn(img)
+        pred, _, confident = name_image(corrected)
+        # 색이 경계 근처이거나, 조명 보정을 믿을 수 없으면 "불확실"
+        rows.append((obj, color, light, pred, confident and reliable))
 
     # 1) 조명별 정확도
     lights = sorted({r[2] for r in rows})
-    acc_by_light = {}
-    for light in lights:
-        sub = [r for r in rows if r[2] == light]
-        acc_by_light[light] = sum(r[1] == r[3] for r in sub) / len(sub)
-    acc_total = sum(r[1] == r[3] for r in rows) / len(rows)
+    acc_by_light = {light: ratio([r for r in rows if r[2] == light]) for light in lights}
 
     # 2) 조명 간 일관성: 한 물체의 모든 사진이 같은 이름으로 나온 물체의 비율
     objects = sorted({r[0] for r in rows})
@@ -67,29 +72,40 @@ def evaluate(samples, method_name):
         preds = {r[3] for r in rows if r[0] == obj}
         if len(preds) == 1:
             consistent += 1
-    consistency = consistent / len(objects)
 
     # 3) confusion matrix: 행 = 정답, 열 = 예측
     n = len(COLOR_NAMES)
     cm = np.zeros((n, n), dtype=int)
-    for _, color, _, pred in rows:
+    for _, color, _, pred, _ in rows:
         cm[COLOR_NAMES.index(color), COLOR_NAMES.index(pred)] += 1
 
-    return {"acc_by_light": acc_by_light, "acc_total": acc_total,
-            "consistency": consistency, "cm": cm, "rows": rows}
+    # 4) 불확실 표시의 정직성: "확신"이라고 한 것은 잘 맞고, "불확실"이라고 한 것은 덜 맞아야 의미가 있다
+    sure = [r for r in rows if r[4]]
+    unsure = [r for r in rows if not r[4]]
+
+    return {"acc_by_light": acc_by_light, "acc_total": ratio(rows),
+            "consistency": consistent / len(objects), "cm": cm, "rows": rows,
+            "unsure_ratio": len(unsure) / len(rows),
+            "acc_sure": ratio(sure), "acc_unsure": ratio(unsure)}
+
+
+def fmt(value, width=10):
+    """숫자를 표 한 칸으로. 값이 없으면 '-'"""
+    return f"{'-':>{width}}" if value is None else f"{value:>{width}.2f}"
 
 
 def save_results(results, out_dir):
     """요약 표와 confusion matrix를 CSV로 저장한다."""
     os.makedirs(out_dir, exist_ok=True)
     lights = sorted(next(iter(results.values()))["acc_by_light"].keys())
+    extra = ["acc_total", "consistency", "unsure_ratio", "acc_sure", "acc_unsure"]
 
     with open(os.path.join(out_dir, "summary.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["method"] + lights + ["total", "consistency"])
+        w.writerow(["method"] + lights + extra)
         for name, r in results.items():
-            w.writerow([name] + [f"{r['acc_by_light'][l]:.3f}" for l in lights]
-                       + [f"{r['acc_total']:.3f}", f"{r['consistency']:.3f}"])
+            values = [r["acc_by_light"][l] for l in lights] + [r[k] for k in extra]
+            w.writerow([name] + ["" if v is None else f"{v:.3f}" for v in values])
 
     for name, r in results.items():
         with open(os.path.join(out_dir, f"confusion_{name}.csv"), "w", newline="", encoding="utf-8-sig") as f:
@@ -121,7 +137,7 @@ def plot_accuracy(results, out_path):
 
 
 def main():
-    folder = sys.argv[1] if len(sys.argv) > 1 else "data/raw"
+    folder = sys.argv[1] if len(sys.argv) > 1 else "data/raw/natural"
     samples = load_samples(folder)
     if not samples:
         print(f"{folder} 에 평가할 이미지가 없습니다.")
@@ -131,10 +147,16 @@ def main():
     results = {name: evaluate(samples, name) for name in METHODS}
 
     lights = sorted(results["none"]["acc_by_light"].keys())
+    print("[조명별 정확도, 조명 간 일관성]")
     print(f"{'method':<12}" + "".join(f"{l:>10}" for l in lights) + f"{'total':>10}{'consist.':>10}")
     for name, r in results.items():
-        print(f"{name:<12}" + "".join(f"{r['acc_by_light'][l]:>10.2f}" for l in lights)
-              + f"{r['acc_total']:>10.2f}{r['consistency']:>10.2f}")
+        print(f"{name:<12}" + "".join(fmt(r["acc_by_light"][l]) for l in lights)
+              + fmt(r["acc_total"]) + fmt(r["consistency"]))
+
+    print("\n[불확실 표시의 정직성]")
+    print(f"{'method':<12}{'불확실 비율':>10}{'확신 정확도':>10}{'불확실 정확도':>10}")
+    for name, r in results.items():
+        print(f"{name:<12}" + fmt(r["unsure_ratio"], 14) + fmt(r["acc_sure"], 14) + fmt(r["acc_unsure"], 14))
 
     out_dir = os.path.join("results", os.path.basename(os.path.normpath(folder)))
     save_results(results, out_dir)
