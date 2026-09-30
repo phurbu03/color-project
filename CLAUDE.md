@@ -50,6 +50,7 @@
 - 첫 구현 완료: `src/color_naming.py`(HSV 규칙 11색), `src/illumination.py`(Gray World / White Patch), `src/evaluate.py`(조명별 정확도·일관성·confusion matrix)
   - 합성 이미지(`data/synthetic`)로 끝까지 도는 것만 확인함. 실제 사진으로는 아직 검증 안 됨
   - HSV 경계값은 전부 시작값이라 실제 촬영 데이터로 조정해야 함
+- 어려운 합성 세트 990장(`tools/make_synthetic_hard.py`)으로 시험한 결과: 배경지가 있으면 보정이 도움이 되고(White Patch 0.91), 나무 책상 배경이나 물체만 가득 찬 사진에서는 Gray World / White Patch가 보정 없음보다 나빠짐. 흰색↔회색, 주황↔갈색, 분홍↔빨강 혼동이 많음
 - 파일명의 정답색·조명은 영어 코드로 씀 (`03_red_warm_2.jpg`). 코드표는 `docs/shooting-guide.md`
 - 촬영 가이드 초안 완성: `docs/shooting-guide.md`
 - 아직 안 정한 것: 팀원 역할 분담, Colab vs 로컬 실행 환경, 촬영 일정, 색 샘플·조명 준비물, 화이트밸런스 고정 여부

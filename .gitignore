@@ -4,4 +4,5 @@ __pycache__/
 
 # 다시 만들 수 있는 것들
 data/synthetic/
+data/synthetic_hard/
 results/
