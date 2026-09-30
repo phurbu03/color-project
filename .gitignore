@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 다시 만들 수 있는 것들
+data/synthetic/
+results/
