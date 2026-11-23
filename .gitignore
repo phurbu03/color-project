@@ -6,3 +6,6 @@ __pycache__/
 data/synthetic/
 data/synthetic_hard/
 results/
+
+# 개인 작업 메모 (Claude Code용)
+CLAUDE.md
